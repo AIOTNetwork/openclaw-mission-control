@@ -24,3 +24,13 @@ backend/coverage.*
 backend/.coverage
 frontend/coverage
 backend/app/services/openclaw/.device-keys
+
+# Generated runtime data
+openclaw-configs/
+
+# Root-level npm (IDE type hints only)
+/package.json
+/package-lock.json
+
+# Plancraft
+.plancraft/
