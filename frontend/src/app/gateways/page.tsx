@@ -2,18 +2,18 @@
 
 export const dynamic = "force-dynamic";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { useAuth } from "@/auth/clerk";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { GatewaysTable } from "@/components/gateways/GatewaysTable";
 import { DashboardPageLayout } from "@/components/templates/DashboardPageLayout";
 import { buttonVariants } from "@/components/ui/button";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
-import { ApiError } from "@/api/mutator";
+import { ApiError, customFetch } from "@/api/mutator";
 import {
   type listGatewaysApiV1GatewaysGetResponse,
   getListGatewaysApiV1GatewaysGetQueryKey,
@@ -24,6 +24,10 @@ import { createOptimisticListDeleteMutation } from "@/lib/list-delete";
 import { useOrganizationMembership } from "@/lib/use-organization-membership";
 import type { GatewayRead } from "@/api/generated/model";
 import { useUrlSorting } from "@/lib/use-url-sorting";
+
+type BatchContainerStatusResponse = {
+  statuses: Record<string, boolean>;
+};
 
 const GATEWAY_SORTABLE_COLUMNS = ["name", "workspace_root", "updated_at"];
 
@@ -57,6 +61,63 @@ export default function GatewaysPage() {
         ? (gatewaysQuery.data.data.items ?? [])
         : [],
     [gatewaysQuery.data],
+  );
+
+  const hasManagedGateways = useMemo(
+    () => gateways.some((gw) => (gw as GatewayRead & { managed?: boolean }).managed),
+    [gateways],
+  );
+
+  const containerStatusesKey = ["containerStatuses"];
+  const containerStatusesQuery = useQuery<
+    { data: BatchContainerStatusResponse; status: number },
+    ApiError
+  >({
+    queryKey: containerStatusesKey,
+    queryFn: () =>
+      customFetch<{ data: BatchContainerStatusResponse; status: number }>(
+        "/api/v1/gateways/docker/container-statuses",
+        { method: "GET" },
+      ),
+    enabled: Boolean(isSignedIn && isAdmin && hasManagedGateways),
+    refetchInterval: 10_000,
+  });
+
+  const containerStatuses = containerStatusesQuery.data?.data?.statuses;
+
+  const [stopTarget, setStopTarget] = useState<GatewayRead | null>(null);
+
+  const stopMutation = useMutation<unknown, ApiError, { gatewayId: string }>({
+    mutationFn: ({ gatewayId }) =>
+      customFetch(`/api/v1/gateways/${gatewayId}/docker/stop`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      setStopTarget(null);
+      void queryClient.invalidateQueries({ queryKey: containerStatusesKey });
+    },
+  });
+
+  const startMutation = useMutation<unknown, ApiError, { gatewayId: string }>({
+    mutationFn: ({ gatewayId }) =>
+      customFetch(`/api/v1/gateways/${gatewayId}/docker/start`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: containerStatusesKey });
+    },
+  });
+
+  const handleStop = useCallback(() => {
+    if (!stopTarget) return;
+    stopMutation.mutate({ gatewayId: stopTarget.id });
+  }, [stopTarget, stopMutation]);
+
+  const handleStart = useCallback(
+    (gateway: GatewayRead) => {
+      startMutation.mutate({ gatewayId: gateway.id });
+    },
+    [startMutation],
   );
 
   const deleteMutation = useDeleteGatewayApiV1GatewaysGatewayIdDelete<
@@ -122,6 +183,9 @@ export default function GatewaysPage() {
             showActions
             stickyHeader
             onDelete={setDeleteTarget}
+            onStop={setStopTarget}
+            onStart={handleStart}
+            containerStatuses={containerStatuses}
             emptyState={{
               title: "No gateways yet",
               description:
@@ -154,6 +218,26 @@ export default function GatewaysPage() {
         cancelVariant="ghost"
         onConfirm={handleDelete}
         isConfirming={deleteMutation.isPending}
+      />
+
+      <ConfirmActionDialog
+        open={Boolean(stopTarget)}
+        onOpenChange={() => setStopTarget(null)}
+        title="Stop gateway container?"
+        description={
+          <>
+            This will stop the Docker container for{" "}
+            <strong>{stopTarget?.name}</strong>. The gateway will go offline
+            until you start it again.
+          </>
+        }
+        confirmLabel="Stop"
+        confirmingLabel="Stopping…"
+        errorMessage={stopMutation.error?.message}
+        errorStyle="text"
+        cancelVariant="ghost"
+        onConfirm={handleStop}
+        isConfirming={stopMutation.isPending}
       />
     </>
   );

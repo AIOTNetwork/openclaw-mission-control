@@ -15,6 +15,7 @@ import { type GatewayRead } from "@/api/generated/model";
 import {
   DataTable,
   type DataTableEmptyState,
+  type DataTableRowAction,
 } from "@/components/tables/DataTable";
 import { dateCell, linkifyCell } from "@/components/tables/cell-formatters";
 import { truncateText as truncate } from "@/lib/formatters";
@@ -30,6 +31,9 @@ type GatewaysTableProps = {
   columnOrder?: string[];
   disableSorting?: boolean;
   onDelete?: (gateway: GatewayRead) => void;
+  onStop?: (gateway: GatewayRead) => void;
+  onStart?: (gateway: GatewayRead) => void;
+  containerStatuses?: Record<string, boolean>;
   emptyMessage?: string;
   emptyState?: Omit<DataTableEmptyState, "icon"> & {
     icon?: DataTableEmptyState["icon"];
@@ -62,6 +66,9 @@ export function GatewaysTable({
   columnOrder,
   disableSorting = false,
   onDelete,
+  onStop,
+  onStart,
+  containerStatuses,
   emptyMessage = "No gateways found.",
   emptyState,
 }: GatewaysTableProps) {
@@ -89,12 +96,20 @@ export function GatewaysTable({
       {
         accessorKey: "name",
         header: "Gateway",
-        cell: ({ row }) =>
-          linkifyCell({
-            href: `/gateways/${row.original.id}`,
-            label: row.original.name,
-            subtitle: truncate(row.original.url, 36),
-          }),
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            {linkifyCell({
+              href: `/gateways/${row.original.id}`,
+              label: row.original.name,
+              subtitle: truncate(row.original.url, 36),
+            })}
+            {(row.original as GatewayRead & { managed?: boolean }).managed ? (
+              <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                Managed
+              </span>
+            ) : null}
+          </div>
+        ),
       },
       {
         accessorKey: "workspace_root",
@@ -139,8 +154,38 @@ export function GatewaysTable({
       rowActions={
         showActions
           ? {
-              getEditHref: (gateway) => `/gateways/${gateway.id}/edit`,
-              onDelete,
+              actions: [
+                {
+                  key: "stop",
+                  label: "Stop",
+                  onClick: onStop ? (gw) => onStop(gw) : undefined,
+                  className: "text-red-600 hover:text-red-700",
+                  visible: (gw) =>
+                    Boolean((gw as GatewayRead & { managed?: boolean }).managed && containerStatuses?.[gw.id] === true),
+                } satisfies DataTableRowAction<GatewayRead>,
+                {
+                  key: "start",
+                  label: "Start",
+                  onClick: onStart ? (gw) => onStart(gw) : undefined,
+                  className: "text-green-600 hover:text-green-700",
+                  visible: (gw) =>
+                    Boolean((gw as GatewayRead & { managed?: boolean }).managed && containerStatuses?.[gw.id] === false),
+                } satisfies DataTableRowAction<GatewayRead>,
+                {
+                  key: "edit",
+                  label: "Edit",
+                  href: (gateway) => `/gateways/${gateway.id}/edit`,
+                } satisfies DataTableRowAction<GatewayRead>,
+                ...(onDelete
+                  ? [
+                      {
+                        key: "delete",
+                        label: "Delete",
+                        onClick: onDelete,
+                      } satisfies DataTableRowAction<GatewayRead>,
+                    ]
+                  : []),
+              ],
             }
           : undefined
       }
