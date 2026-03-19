@@ -11,6 +11,7 @@ import { ApiError } from "@/api/mutator";
 import { useCreateGatewayApiV1GatewaysPost } from "@/api/generated/gateways/gateways";
 import { useOrganizationMembership } from "@/lib/use-organization-membership";
 import { GatewayForm } from "@/components/gateways/GatewayForm";
+import { GatewaySpinUpForm } from "@/components/gateways/GatewaySpinUpForm";
 import { DashboardPageLayout } from "@/components/templates/DashboardPageLayout";
 import {
   DEFAULT_WORKSPACE_ROOT,
@@ -19,12 +20,17 @@ import {
   validateGatewayUrl,
 } from "@/lib/gateway-form";
 
+type Mode = "register" | "spin-up";
+
 export default function NewGatewayPage() {
   const { isSignedIn } = useAuth();
   const router = useRouter();
 
   const { isAdmin } = useOrganizationMembership(isSignedIn);
 
+  const [mode, setMode] = useState<Mode>("register");
+
+  // --- Register Existing state ---
   const [name, setName] = useState("");
   const [gatewayUrl, setGatewayUrl] = useState("");
   const [gatewayToken, setGatewayToken] = useState("");
@@ -120,49 +126,82 @@ export default function NewGatewayPage() {
       isAdmin={isAdmin}
       adminOnlyMessage="Only organization owners and admins can create gateways."
     >
-      <GatewayForm
-        name={name}
-        gatewayUrl={gatewayUrl}
-        gatewayToken={gatewayToken}
-        disableDevicePairing={disableDevicePairing}
-        workspaceRoot={workspaceRoot}
-        allowInsecureTls={allowInsecureTls}
-        gatewayUrlError={gatewayUrlError}
-        gatewayCheckStatus={gatewayCheckStatus}
-        gatewayCheckMessage={gatewayCheckMessage}
-        errorMessage={error}
-        isLoading={isLoading}
-        canSubmit={canSubmit}
-        workspaceRootPlaceholder={DEFAULT_WORKSPACE_ROOT}
-        cancelLabel="Cancel"
-        submitLabel="Create gateway"
-        submitBusyLabel="Creating…"
-        onSubmit={handleSubmit}
-        onCancel={() => router.push("/gateways")}
-        onNameChange={setName}
-        onGatewayUrlChange={(next) => {
-          setGatewayUrl(next);
-          setGatewayUrlError(null);
-          setGatewayCheckStatus("idle");
-          setGatewayCheckMessage(null);
-        }}
-        onGatewayTokenChange={(next) => {
-          setGatewayToken(next);
-          setGatewayCheckStatus("idle");
-          setGatewayCheckMessage(null);
-        }}
-        onDisableDevicePairingChange={(next) => {
-          setDisableDevicePairing(next);
-          setGatewayCheckStatus("idle");
-          setGatewayCheckMessage(null);
-        }}
-        onWorkspaceRootChange={setWorkspaceRoot}
-        onAllowInsecureTlsChange={(next) => {
-          setAllowInsecureTls(next);
-          setGatewayCheckStatus("idle");
-          setGatewayCheckMessage(null);
-        }}
-      />
+      {/* Mode toggle tabs */}
+      <div className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1">
+        <button
+          type="button"
+          onClick={() => setMode("register")}
+          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition ${
+            mode === "register"
+              ? "bg-white text-slate-900 shadow-sm"
+              : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          Register Existing
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("spin-up")}
+          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition ${
+            mode === "spin-up"
+              ? "bg-white text-slate-900 shadow-sm"
+              : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          Spin Up New
+        </button>
+      </div>
+
+      {mode === "register" ? (
+        <GatewayForm
+          name={name}
+          gatewayUrl={gatewayUrl}
+          gatewayToken={gatewayToken}
+          disableDevicePairing={disableDevicePairing}
+          workspaceRoot={workspaceRoot}
+          allowInsecureTls={allowInsecureTls}
+          gatewayUrlError={gatewayUrlError}
+          gatewayCheckStatus={gatewayCheckStatus}
+          gatewayCheckMessage={gatewayCheckMessage}
+          errorMessage={error}
+          isLoading={isLoading}
+          canSubmit={canSubmit}
+          workspaceRootPlaceholder={DEFAULT_WORKSPACE_ROOT}
+          cancelLabel="Cancel"
+          submitLabel="Create gateway"
+          submitBusyLabel="Creating…"
+          onSubmit={handleSubmit}
+          onCancel={() => router.push("/gateways")}
+          onNameChange={setName}
+          onGatewayUrlChange={(next) => {
+            setGatewayUrl(next);
+            setGatewayUrlError(null);
+            setGatewayCheckStatus("idle");
+            setGatewayCheckMessage(null);
+          }}
+          onGatewayTokenChange={(next) => {
+            setGatewayToken(next);
+            setGatewayCheckStatus("idle");
+            setGatewayCheckMessage(null);
+          }}
+          onDisableDevicePairingChange={(next) => {
+            setDisableDevicePairing(next);
+            setGatewayCheckStatus("idle");
+            setGatewayCheckMessage(null);
+          }}
+          onWorkspaceRootChange={setWorkspaceRoot}
+          onAllowInsecureTlsChange={(next) => {
+            setAllowInsecureTls(next);
+            setGatewayCheckStatus("idle");
+            setGatewayCheckMessage(null);
+          }}
+        />
+      ) : (
+        <GatewaySpinUpForm
+          onSuccess={(gatewayId) => router.push(`/gateways/${gatewayId}`)}
+          onCancel={() => router.push("/gateways")}
+        />
+      )}
     </DashboardPageLayout>
   );
 }

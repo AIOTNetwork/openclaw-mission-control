@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -17,6 +18,12 @@ from app.models.agents import Agent
 from app.models.gateways import Gateway
 from app.models.skills import GatewayInstalledSkill
 from app.schemas.common import OkResponse
+from app.schemas.gateway_docker import (
+    BatchContainerStatusResponse,
+    DockerStatusResponse,
+    GatewaySpinUpCreate,
+    GatewaySpinUpResponse,
+)
 from app.schemas.gateways import (
     GatewayCreate,
     GatewayRead,
@@ -25,6 +32,8 @@ from app.schemas.gateways import (
 )
 from app.schemas.pagination import DefaultLimitOffsetPage
 from app.services.openclaw.admin_service import GatewayAdminLifecycleService
+from app.services.openclaw.docker_service import OpenClawDockerService
+from app.services.openclaw.gateway_spinup_service import GatewaySpinUpService
 from app.services.openclaw.session_service import GatewayTemplateSyncQuery
 
 if TYPE_CHECKING:
@@ -32,6 +41,8 @@ if TYPE_CHECKING:
     from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.services.organizations import OrganizationContext
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/gateways", tags=["gateways"])
@@ -109,6 +120,158 @@ async def create_gateway(
     gateway = await crud.create(session, Gateway, **data)
     await service.ensure_main_agent(gateway, auth, action="provision")
     return gateway
+
+
+@router.get("/docker/status", response_model=DockerStatusResponse)
+async def docker_status(
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> DockerStatusResponse:
+    """Check Docker daemon availability and OpenClaw image status."""
+    docker = OpenClawDockerService()
+    available = docker.check_docker_available()
+    image_exists = docker.check_image_exists() if available else False
+    return DockerStatusResponse(docker_available=available, image_exists=image_exists)
+
+
+@router.post("/docker/build-image", response_model=OkResponse)
+async def build_image(
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> OkResponse:
+    """Build the openclaw:local Docker image from the mounted repo."""
+    from fastapi import HTTPException
+
+    from app.core.config import settings
+    from app.services.openclaw.docker_service import DockerError
+
+    docker = OpenClawDockerService()
+    if not docker.check_docker_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Docker daemon is not reachable.",
+        )
+    try:
+        docker.build_image(settings.openclaw_repo_path)
+    except DockerError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Image build failed: {exc}",
+        ) from exc
+    return OkResponse()
+
+
+@router.post("/spin-up", response_model=GatewaySpinUpResponse)
+async def spin_up_gateway(
+    payload: GatewaySpinUpCreate,
+    session: AsyncSession = SESSION_DEP,
+    auth: AuthContext = AUTH_DEP,
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> GatewaySpinUpResponse:
+    """Spin up a new managed OpenClaw gateway container."""
+    service = GatewaySpinUpService(session)
+    return await service.spin_up(
+        payload,
+        organization_id=ctx.organization.id,
+        auth=auth,
+    )
+
+
+@router.get("/docker/container-statuses", response_model=BatchContainerStatusResponse)
+async def container_statuses(
+    session: AsyncSession = SESSION_DEP,
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> BatchContainerStatusResponse:
+    """Return running status for all managed gateway containers."""
+    managed_gateways = await Gateway.objects.filter_by(
+        organization_id=ctx.organization.id,
+        managed=True,
+    ).all(session)
+    docker = OpenClawDockerService()
+    statuses: dict[str, bool] = {}
+    for gw in managed_gateways:
+        if gw.docker_project_name:
+            statuses[str(gw.id)] = docker.check_container_running(gw.docker_project_name)
+    return BatchContainerStatusResponse(statuses=statuses)
+
+
+@router.post("/{gateway_id}/docker/stop", response_model=OkResponse)
+async def stop_gateway_container(
+    gateway_id: UUID,
+    session: AsyncSession = SESSION_DEP,
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> OkResponse:
+    """Stop a managed gateway container."""
+    from fastapi import HTTPException
+
+    service = GatewayAdminLifecycleService(session)
+    gateway = await service.require_gateway(
+        gateway_id=gateway_id,
+        organization_id=ctx.organization.id,
+    )
+    if not gateway.managed or not gateway.docker_project_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Gateway is not a managed Docker container.",
+        )
+    docker = OpenClawDockerService()
+    docker.pause_container(gateway.docker_project_name)
+    return OkResponse()
+
+
+@router.post("/{gateway_id}/docker/start", response_model=OkResponse)
+async def start_gateway_container(
+    gateway_id: UUID,
+    session: AsyncSession = SESSION_DEP,
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> OkResponse:
+    """Start a stopped managed gateway container."""
+    from fastapi import HTTPException
+
+    from app.services.openclaw.docker_service import DockerError
+
+    service = GatewayAdminLifecycleService(session)
+    gateway = await service.require_gateway(
+        gateway_id=gateway_id,
+        organization_id=ctx.organization.id,
+    )
+    if not gateway.managed or not gateway.docker_project_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Gateway is not a managed Docker container.",
+        )
+    docker = OpenClawDockerService()
+    # Try `docker compose start` first (resumes a stopped container).
+    # If the container was removed (e.g. after a system restart), fall back
+    # to `restart_container` which does `docker compose up -d`.
+    if not docker.resume_container(gateway.docker_project_name):
+        if not gateway.config_dir:
+            raise HTTPException(
+                status_code=400,
+                detail="Gateway is missing config directory.",
+            )
+        from app.core.config import settings
+
+        if not settings.openclaw_docker_enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Docker management is not enabled on this server.",
+            )
+        container_config_dir = gateway.config_dir.replace(
+            settings.openclaw_config_host_dir,
+            settings.openclaw_config_base_dir,
+            1,
+        )
+        try:
+            docker.restart_container(
+                gateway.docker_project_name,
+                container_config_dir,
+                settings.openclaw_repo_path,
+            )
+        except DockerError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to start container: {exc}",
+            ) from exc
+    return OkResponse()
 
 
 @router.get("/{gateway_id}", response_model=GatewayRead)
@@ -220,6 +383,17 @@ async def delete_gateway(
     ).all(session)
     for installed_skill in installed_skills:
         await session.delete(installed_skill)
+
+    # If managed, stop and remove the Docker container.
+    if gateway.managed and gateway.docker_project_name:
+        docker = OpenClawDockerService()
+        try:
+            docker.remove_container(gateway.docker_project_name)
+        except Exception:
+            logger.warning(
+                "Failed to remove Docker container for managed gateway %s",
+                gateway.id,
+            )
 
     await session.delete(gateway)
     await session.commit()
