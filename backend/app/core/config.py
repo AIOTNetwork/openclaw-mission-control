@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     # OpenClaw gateway runtime compatibility
     gateway_min_version: str = "2026.02.9"
 
+    # OpenClaw Docker management
+    openclaw_docker_enabled: bool = False
+    openclaw_repo_path: str = ""
+    openclaw_config_base_dir: str = ""
+    openclaw_config_host_dir: str = ""
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "text"
@@ -133,6 +139,20 @@ class Settings(BaseSettings):
                     "when RATE_LIMIT_BACKEND=redis.",
                 )
             self.rate_limit_redis_url = fallback_url
+
+        # OpenClaw Docker management: if enabled, require all paths.
+        if self.openclaw_docker_enabled:
+            missing = []
+            if not self.openclaw_repo_path.strip():
+                missing.append("OPENCLAW_REPO_PATH")
+            if not self.openclaw_config_base_dir.strip():
+                missing.append("OPENCLAW_CONFIG_BASE_DIR")
+            if not self.openclaw_config_host_dir.strip():
+                missing.append("OPENCLAW_CONFIG_HOST_DIR")
+            if missing:
+                raise ValueError(
+                    f"OPENCLAW_DOCKER_ENABLED=true requires: {', '.join(missing)}",
+                )
 
         # In dev, default to applying Alembic migrations at startup to avoid
         # schema drift (e.g. missing newly-added columns).

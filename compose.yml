@@ -45,6 +45,20 @@ services:
       LOCAL_AUTH_TOKEN: ${LOCAL_AUTH_TOKEN}
       BASE_URL: ${BASE_URL:-http://localhost:8000}
       RQ_REDIS_URL: redis://redis:6379/0
+      GATEWAY_MIN_VERSION: ${GATEWAY_MIN_VERSION:-2026.02.9}
+      # OpenClaw Docker management
+      OPENCLAW_DOCKER_ENABLED: ${OPENCLAW_DOCKER_ENABLED:-false}
+      OPENCLAW_REPO_PATH: /openclaw-repo
+      OPENCLAW_CONFIG_BASE_DIR: /openclaw-configs
+      OPENCLAW_CONFIG_HOST_DIR: ${OPENCLAW_CONFIG_HOST_DIR:-./openclaw-configs}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${OPENCLAW_REPO_PATH:-.}:/openclaw-repo:ro
+      - ${OPENCLAW_CONFIG_HOST_DIR:-./openclaw-configs}:/openclaw-configs
+    # Grant access to Docker socket (GID 0 on macOS Docker Desktop).
+    # On Linux, replace with the host's docker group GID.
+    group_add:
+      - "0"
     depends_on:
       db:
         condition: service_healthy
