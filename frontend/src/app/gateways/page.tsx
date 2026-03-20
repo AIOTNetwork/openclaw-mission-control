@@ -27,6 +27,7 @@ import { useUrlSorting } from "@/lib/use-url-sorting";
 
 type BatchContainerStatusResponse = {
   statuses: Record<string, boolean>;
+  unpaired: string[];
 };
 
 const GATEWAY_SORTABLE_COLUMNS = ["name", "workspace_root", "updated_at"];
@@ -84,6 +85,7 @@ export default function GatewaysPage() {
   });
 
   const containerStatuses = containerStatusesQuery.data?.data?.statuses;
+  const unpairedGatewayIds = containerStatusesQuery.data?.data?.unpaired;
 
   const [stopTarget, setStopTarget] = useState<GatewayRead | null>(null);
 
@@ -118,6 +120,24 @@ export default function GatewaysPage() {
       startMutation.mutate({ gatewayId: gateway.id });
     },
     [startMutation],
+  );
+
+  const provisionMutation = useMutation<unknown, ApiError, { gatewayId: string }>({
+    mutationFn: ({ gatewayId }) =>
+      customFetch(`/api/v1/gateways/${gatewayId}/docker/provision`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: containerStatusesKey });
+      void queryClient.invalidateQueries({ queryKey: gatewaysKey });
+    },
+  });
+
+  const handleProvision = useCallback(
+    (gateway: GatewayRead) => {
+      provisionMutation.mutate({ gatewayId: gateway.id });
+    },
+    [provisionMutation],
   );
 
   const deleteMutation = useDeleteGatewayApiV1GatewaysGatewayIdDelete<
@@ -185,7 +205,9 @@ export default function GatewaysPage() {
             onDelete={setDeleteTarget}
             onStop={setStopTarget}
             onStart={handleStart}
+            onProvision={handleProvision}
             containerStatuses={containerStatuses}
+            unpairedGatewayIds={unpairedGatewayIds}
             emptyState={{
               title: "No gateways yet",
               description:

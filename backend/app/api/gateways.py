@@ -180,17 +180,22 @@ async def container_statuses(
     session: AsyncSession = SESSION_DEP,
     ctx: OrganizationContext = ORG_ADMIN_DEP,
 ) -> BatchContainerStatusResponse:
-    """Return running status for all managed gateway containers."""
+    """Return running status and unpaired list for all managed gateway containers."""
     managed_gateways = await Gateway.objects.filter_by(
         organization_id=ctx.organization.id,
         managed=True,
     ).all(session)
     docker = OpenClawDockerService()
     statuses: dict[str, bool] = {}
+    unpaired: list[str] = []
+    lifecycle = GatewayAdminLifecycleService(session)
     for gw in managed_gateways:
         if gw.docker_project_name:
             statuses[str(gw.id)] = docker.check_container_running(gw.docker_project_name)
-    return BatchContainerStatusResponse(statuses=statuses)
+        main_agent = await lifecycle.find_main_agent(gw)
+        if main_agent is None:
+            unpaired.append(str(gw.id))
+    return BatchContainerStatusResponse(statuses=statuses, unpaired=unpaired)
 
 
 @router.post("/{gateway_id}/docker/stop", response_model=OkResponse)
@@ -271,6 +276,63 @@ async def start_gateway_container(
                 status_code=500,
                 detail=f"Failed to start container: {exc}",
             ) from exc
+    return OkResponse()
+
+
+@router.post("/{gateway_id}/docker/provision", response_model=OkResponse)
+async def provision_gateway(
+    gateway_id: UUID,
+    session: AsyncSession = SESSION_DEP,
+    auth: AuthContext = AUTH_DEP,
+    ctx: OrganizationContext = ORG_ADMIN_DEP,
+) -> OkResponse:
+    """Retry agent provisioning for a managed gateway whose container is running."""
+    from fastapi import HTTPException
+
+    service = GatewayAdminLifecycleService(session)
+    gateway = await service.require_gateway(
+        gateway_id=gateway_id,
+        organization_id=ctx.organization.id,
+    )
+    if not gateway.managed or not gateway.docker_project_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Gateway is not a managed Docker container.",
+        )
+    docker = OpenClawDockerService()
+    if not docker.check_container_running(gateway.docker_project_name):
+        raise HTTPException(
+            status_code=409,
+            detail="Container is not running. Start it first.",
+        )
+    ready = docker.wait_for_ready(
+        gateway.url, gateway.token or "", timeout=30,
+    )
+    if not ready:
+        raise HTTPException(
+            status_code=503,
+            detail="Gateway is not responsive yet. Try again shortly.",
+        )
+    try:
+        await service.ensure_main_agent(gateway, auth, action="provision")
+        from app.services.openclaw.session_service import GatewayTemplateSyncQuery
+
+        await service.sync_templates(
+            gateway,
+            query=GatewayTemplateSyncQuery(
+                include_main=True,
+                force_bootstrap=True,
+                rotate_tokens=True,
+            ),
+            auth=auth,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Provisioning failed: {exc}",
+        ) from exc
     return OkResponse()
 
 

@@ -33,7 +33,9 @@ type GatewaysTableProps = {
   onDelete?: (gateway: GatewayRead) => void;
   onStop?: (gateway: GatewayRead) => void;
   onStart?: (gateway: GatewayRead) => void;
+  onProvision?: (gateway: GatewayRead) => void;
   containerStatuses?: Record<string, boolean>;
+  unpairedGatewayIds?: string[];
   emptyMessage?: string;
   emptyState?: Omit<DataTableEmptyState, "icon"> & {
     icon?: DataTableEmptyState["icon"];
@@ -68,7 +70,9 @@ export function GatewaysTable({
   onDelete,
   onStop,
   onStart,
+  onProvision,
   containerStatuses,
+  unpairedGatewayIds,
   emptyMessage = "No gateways found.",
   emptyState,
 }: GatewaysTableProps) {
@@ -170,6 +174,18 @@ export function GatewaysTable({
                   className: "text-green-600 hover:text-green-700",
                   visible: (gw) =>
                     Boolean((gw as GatewayRead & { managed?: boolean }).managed && containerStatuses?.[gw.id] === false),
+                } satisfies DataTableRowAction<GatewayRead>,
+                {
+                  key: "provision",
+                  label: "Retry Setup",
+                  onClick: onProvision ? (gw) => onProvision(gw) : undefined,
+                  className: "text-amber-600 hover:text-amber-700",
+                  visible: (gw) =>
+                    Boolean(
+                      (gw as GatewayRead & { managed?: boolean }).managed &&
+                        containerStatuses?.[gw.id] === true &&
+                        unpairedGatewayIds?.includes(gw.id),
+                    ),
                 } satisfies DataTableRowAction<GatewayRead>,
                 {
                   key: "edit",

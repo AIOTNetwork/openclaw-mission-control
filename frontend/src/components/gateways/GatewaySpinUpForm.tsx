@@ -52,6 +52,16 @@ export function GatewaySpinUpForm({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage(null);
+
+    if (discordBotToken.trim() && !discordUserIds.trim()) {
+      setErrorMessage("Discord user IDs are required when a Discord bot token is provided.");
+      return;
+    }
+    if (telegramBotToken.trim() && !telegramUserIds.trim()) {
+      setErrorMessage("Telegram user IDs are required when a Telegram bot token is provided.");
+      return;
+    }
+
     setSpinUpStatus("starting-container");
 
     try {
@@ -96,6 +106,13 @@ export function GatewaySpinUpForm({
       });
 
       if (result.data.status === "error") {
+        // The gateway DB record exists even on timeout — redirect so the
+        // user can retry provisioning from the gateway list once the
+        // container finishes starting up.
+        if (result.data.gateway?.id) {
+          onSuccess(result.data.gateway.id);
+          return;
+        }
         setSpinUpStatus("error");
         setErrorMessage(
           result.data.message || "Gateway failed to start.",
@@ -202,7 +219,10 @@ export function GatewaySpinUpForm({
       <div className="grid gap-6 md:grid-cols-2">
         <div className="space-y-2">
           <label className="text-sm font-medium text-slate-900">
-            Discord user IDs
+            Discord user IDs{" "}
+            {discordBotToken.trim() ? (
+              <span className="text-red-500">*</span>
+            ) : null}
           </label>
           <Input
             value={discordUserIds}
@@ -211,12 +231,15 @@ export function GatewaySpinUpForm({
             disabled={isLoading}
           />
           <p className="text-xs text-slate-500">
-            Pre-authorized user IDs for allowlist mode.
+            Required when Discord bot token is set. Pre-authorized user IDs.
           </p>
         </div>
         <div className="space-y-2">
           <label className="text-sm font-medium text-slate-900">
-            Telegram user IDs
+            Telegram user IDs{" "}
+            {telegramBotToken.trim() ? (
+              <span className="text-red-500">*</span>
+            ) : null}
           </label>
           <Input
             value={telegramUserIds}
@@ -225,7 +248,7 @@ export function GatewaySpinUpForm({
             disabled={isLoading}
           />
           <p className="text-xs text-slate-500">
-            Pre-authorized user IDs for allowlist mode.
+            Required when Telegram bot token is set. Pre-authorized user IDs.
           </p>
         </div>
       </div>
