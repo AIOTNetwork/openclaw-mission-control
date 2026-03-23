@@ -6,13 +6,13 @@ import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { useAuth } from "@/auth/clerk";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AgentsTable } from "@/components/agents/AgentsTable";
 import { DashboardPageLayout } from "@/components/templates/DashboardPageLayout";
 import { Button } from "@/components/ui/button";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
-import { ApiError } from "@/api/mutator";
+import { ApiError, customFetch } from "@/api/mutator";
 import {
   type listBoardsApiV1BoardsGetResponse,
   useListBoardsApiV1BoardsGet,
@@ -110,6 +110,27 @@ export default function GatewayDetailPage() {
     },
     queryClient,
   );
+
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess] = useState(false);
+
+  const syncMutation = useMutation<unknown, ApiError, void>({
+    mutationFn: () =>
+      customFetch(
+        `/api/v1/gateways/${gatewayId}/templates/sync?include_main=true&force_bootstrap=true&rotate_tokens=true`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      setSyncError(null);
+      setSyncSuccess(true);
+      void queryClient.invalidateQueries({ queryKey: agentsKey });
+      setTimeout(() => setSyncSuccess(false), 3000);
+    },
+    onError: (err) => {
+      setSyncError(err.message);
+      setSyncSuccess(false);
+    },
+  });
 
   const statusParams = gateway
     ? {
@@ -285,13 +306,28 @@ export default function GatewayDetailPage() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Agents
                 </p>
-                {agentsQuery.isLoading ? (
-                  <span className="text-xs text-slate-500">Loading…</span>
-                ) : (
-                  <span className="text-xs text-slate-500">
-                    {agents.length} total
-                  </span>
-                )}
+                <div className="flex items-center gap-3">
+                  {syncSuccess ? (
+                    <span className="text-xs text-green-600">Config pushed</span>
+                  ) : syncError ? (
+                    <span className="text-xs text-red-500">{syncError}</span>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={syncMutation.isPending || !gatewayId}
+                    onClick={() => syncMutation.mutate()}
+                  >
+                    {syncMutation.isPending ? "Pushing..." : "Push Agent Config"}
+                  </Button>
+                  {agentsQuery.isLoading ? (
+                    <span className="text-xs text-slate-500">Loading…</span>
+                  ) : (
+                    <span className="text-xs text-slate-500">
+                      {agents.length} total
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="mt-4">
                 <AgentsTable

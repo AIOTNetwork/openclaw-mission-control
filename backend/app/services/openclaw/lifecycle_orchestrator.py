@@ -150,6 +150,7 @@ class AgentLifecycleOrchestrator(OpenClawDBService):
             clear_confirm_token=clear_confirm_token,
         )
         locked.last_provision_error = None
+        locked.last_seen_at = utcnow()
         locked.checkin_deadline_at = utcnow() + CHECKIN_DEADLINE_AFTER_WAKE if wake else None
         self.session.add(locked)
         await self.session.commit()

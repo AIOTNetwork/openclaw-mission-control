@@ -77,8 +77,26 @@ class GatewaySpinUpService:
         # 4. Port allocation
         gateway_port = payload.gateway_port
         if gateway_port is None:
+            # Collect ports already assigned to existing gateways (including
+            # stopped containers) so we don't hand out a conflicting port.
+            import re
+
+            existing_gateways = await Gateway.objects.filter_by(
+                organization_id=org_id,
+            ).all(self.session)
+            reserved_ports: set[int] = set()
+            for gw in existing_gateways:
+                if gw.url:
+                    m = re.search(r":(\d+)$", gw.url)
+                    if m:
+                        gw_port = int(m.group(1))
+                        reserved_ports.add(gw_port)
+                        reserved_ports.add(gw_port + 100)  # bridge port
+
             try:
-                gateway_port = self.docker.find_available_port()
+                gateway_port = self.docker.find_available_port(
+                    reserved_ports=reserved_ports,
+                )
             except DockerError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -189,8 +207,12 @@ class GatewaySpinUpService:
                     gateway,
                     query=GatewayTemplateSyncQuery(
                         include_main=True,
-                        force_bootstrap=True,
+                        lead_only=False,
+                        reset_sessions=False,
                         rotate_tokens=True,
+                        force_bootstrap=True,
+                        overwrite=False,
+                        board_id=None,
                     ),
                     auth=auth,
                 )

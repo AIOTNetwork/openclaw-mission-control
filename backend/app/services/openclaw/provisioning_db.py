@@ -866,13 +866,13 @@ class AgentLifecycleService(OpenClawDBService):
 
     @classmethod
     def with_computed_status(cls, agent: Agent) -> Agent:
-        now = utcnow()
         if agent.status in {"deleting", "updating"}:
             return agent
         if agent.last_seen_at is None:
-            agent.status = "provisioning"
-        elif now - agent.last_seen_at > OFFLINE_AFTER:
-            agent.status = "offline"
+            # Never seen — trust DB status if already "online" (provisioned
+            # but heartbeat never checked in). Otherwise mark provisioning.
+            if agent.status != "online":
+                agent.status = "provisioning"
         return agent
 
     @classmethod

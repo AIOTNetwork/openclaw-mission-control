@@ -60,13 +60,21 @@ class OpenClawDockerService:
             raise DockerError(f"Image build failed: {result.stderr}")
         logger.info("Docker image %s built successfully", image)
 
-    def find_available_port(self, start: int = 48780) -> int:
+    def find_available_port(
+        self,
+        start: int = 48780,
+        reserved_ports: set[int] | None = None,
+    ) -> int:
         """Find the next available TCP port starting from *start*.
 
         Checks Docker host port bindings via ``docker ps`` since this code
         runs inside a container and cannot probe host ports via sockets.
+        *reserved_ports* are additional ports to skip (e.g. ports assigned
+        to stopped gateway containers that could be restarted).
         """
         used_ports = self._get_docker_used_ports()
+        if reserved_ports:
+            used_ports |= reserved_ports
         for port in range(start, 65536):
             bridge_port = port + 100
             if bridge_port > 65535:

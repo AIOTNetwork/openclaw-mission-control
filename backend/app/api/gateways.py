@@ -219,6 +219,13 @@ async def stop_gateway_container(
         )
     docker = OpenClawDockerService()
     docker.pause_container(gateway.docker_project_name)
+    # Mark all agents on this gateway as offline since the container is stopped.
+    agents = await Agent.objects.filter_by(gateway_id=gateway.id).all(session)
+    for agent in agents:
+        if agent.status == "online":
+            agent.status = "offline"
+            session.add(agent)
+    await session.commit()
     return OkResponse()
 
 
@@ -321,8 +328,12 @@ async def provision_gateway(
             gateway,
             query=GatewayTemplateSyncQuery(
                 include_main=True,
-                force_bootstrap=True,
+                lead_only=False,
+                reset_sessions=False,
                 rotate_tokens=True,
+                force_bootstrap=True,
+                overwrite=False,
+                board_id=None,
             ),
             auth=auth,
         )
