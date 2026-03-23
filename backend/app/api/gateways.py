@@ -233,9 +233,10 @@ async def stop_gateway_container(
 async def start_gateway_container(
     gateway_id: UUID,
     session: AsyncSession = SESSION_DEP,
+    auth: AuthContext = AUTH_DEP,
     ctx: OrganizationContext = ORG_ADMIN_DEP,
 ) -> OkResponse:
-    """Start a stopped managed gateway container."""
+    """Start a stopped managed gateway container and re-provision agents."""
     from fastapi import HTTPException
 
     from app.services.openclaw.docker_service import DockerError
@@ -283,6 +284,35 @@ async def start_gateway_container(
                 status_code=500,
                 detail=f"Failed to start container: {exc}",
             ) from exc
+
+    # Re-provision agents so they check in and flip back to online.
+    # The stop endpoint marks agents offline; this is the reverse path.
+    ready = docker.wait_for_ready(
+        gateway.url, gateway.token or "", timeout=30,
+    )
+    if ready:
+        try:
+            await service.ensure_main_agent(gateway, auth, action="provision")
+            await service.sync_templates(
+                gateway,
+                query=GatewayTemplateSyncQuery(
+                    include_main=True,
+                    lead_only=False,
+                    reset_sessions=False,
+                    rotate_tokens=True,
+                    force_bootstrap=True,
+                    overwrite=False,
+                    board_id=None,
+                ),
+                auth=auth,
+            )
+        except Exception:
+            logger.warning(
+                "Post-start provisioning failed for gateway %s; "
+                "agents may remain offline until manual re-provision.",
+                gateway_id,
+                exc_info=True,
+            )
     return OkResponse()
 
 

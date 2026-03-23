@@ -365,12 +365,19 @@ export function GatewaySpinUpForm({
                 Go to <strong>Bot</strong> tab → click &quot;Reset Token&quot;
                 to get the bot token
               </li>
-              <li>
-                Enable <strong>Message Content Intent</strong> under Privileged
-                Gateway Intents
-              </li>
               <li>Paste the token below</li>
             </ol>
+            <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p className="font-bold">
+                ⚠ REQUIRED: Enable &quot;Message Content Intent&quot;
+              </p>
+              <p className="mt-0.5">
+                In the Discord Developer Portal → <strong>Bot</strong> tab →
+                scroll to <strong>Privileged Gateway Intents</strong> → toggle on{" "}
+                <strong>Message Content Intent</strong> and save. Without this,
+                the bot will fail to connect with error 4014.
+              </p>
+            </div>
           </div>
         ) : null}
 
