@@ -158,6 +158,7 @@ export function BoardOnboardingChat({
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const freeTextRef = useRef<HTMLTextAreaElement | null>(null);
   const extraContextRef = useRef<HTMLTextAreaElement | null>(null);
+  const started = useRef(false);
 
   const normalizedMessages = useMemo(
     () => normalizeMessages(session?.messages),
@@ -223,6 +224,7 @@ export function BoardOnboardingChat({
       );
       if (result.status !== 200) throw new Error("Unable to start onboarding.");
       setSession(result.data);
+      started.current = true;
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to start onboarding.",
@@ -248,7 +250,9 @@ export function BoardOnboardingChat({
   }, [startSession]);
 
   const shouldPollSession =
-    isPageActive && (loading || isAwaitingAgent || (!question && !draft));
+    isPageActive &&
+    started.current &&
+    (loading || isAwaitingAgent || (!question && !draft));
 
   useEffect(() => {
     if (!shouldPollSession) return;
