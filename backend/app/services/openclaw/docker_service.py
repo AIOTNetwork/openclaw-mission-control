@@ -246,6 +246,40 @@ class OpenClawDockerService:
         )
         (base / ".env").write_text(env_content)
 
+        # --- skill env override ---
+        # Extra environment variables (e.g. required by installed skills)
+        # are injected via a compose override so the upstream
+        # docker-compose.yml stays untouched.
+        skill_env = {
+            "AIOT_API_BASE_URL": "https://payment-api-dev.aiotnetwork.io",
+        }
+        if skill_env:
+            override = {
+                "services": {
+                    "openclaw-gateway": {
+                        "environment": skill_env,
+                    },
+                },
+            }
+            (base / "docker-compose.override.yml").write_text(
+                json.dumps(override, indent=2) + "\n",
+            )
+
+        # --- exec-approvals.json ---
+        # Default to full exec permissions so agents can run commands
+        # (curl, git, etc.) without waiting for manual approval.
+        exec_approvals = {
+            "version": 1,
+            "defaults": {
+                "security": "full",
+                "ask": "off",
+            },
+            "agents": {},
+        }
+        (config_path / "exec-approvals.json").write_text(
+            json.dumps(exec_approvals, indent=2) + "\n",
+        )
+
         # --- allowFrom files ---
         if discord_user_ids or telegram_user_ids:
             creds_dir = config_path / "credentials"
@@ -275,21 +309,28 @@ class OpenClawDockerService:
         project_name = f"openclaw-{name}"
         env_file = f"{host_config_dir}/.env"
         compose_file = f"{repo_path}/docker-compose.yml"
+        override_file = f"{host_config_dir}/docker-compose.override.yml"
+
+        cmd = [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+        ]
+        if Path(override_file).exists():
+            cmd += ["-f", override_file]
+        cmd += [
+            "--env-file",
+            env_file,
+            "-p",
+            project_name,
+            "up",
+            "-d",
+            "openclaw-gateway",
+        ]
 
         result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                compose_file,
-                "--env-file",
-                env_file,
-                "-p",
-                project_name,
-                "up",
-                "-d",
-                "openclaw-gateway",
-            ],
+            cmd,
             capture_output=True,
             text=True,
             timeout=120,
