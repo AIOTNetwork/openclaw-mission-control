@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 
     cors_origins: str = ""
     base_url: str = ""
+    agent_base_url: str = ""
 
     # Security response headers (set to blank to disable a specific header)
     security_header_x_content_type_options: str = "nosniff"
@@ -124,6 +125,13 @@ class Settings(BaseSettings):
                 "BASE_URL must be an absolute http(s) URL (e.g. http://localhost:8000).",
             )
         self.base_url = base_url.rstrip("/")
+
+        # agent_base_url: URL that gateway agents use to reach Mission Control.
+        # Falls back to base_url when not set.
+        agent_base = self.agent_base_url.strip()
+        if not agent_base:
+            agent_base = self.base_url
+        self.agent_base_url = agent_base.rstrip("/")
 
         # Rate-limit: fall back to rq_redis_url if using redis backend
         # with no explicit rate-limit URL. If both are blank, fail fast

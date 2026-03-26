@@ -229,7 +229,7 @@ async def start_onboarding(
         return onboarding
 
     dispatcher = BoardOnboardingMessagingService(session)
-    base_url = settings.base_url
+    base_url = settings.agent_base_url
     prompt = (
         "BOARD ONBOARDING REQUEST\n\n"
         f"Board Name: {board.name}\n"

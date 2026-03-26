@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
@@ -42,8 +43,10 @@ from app.services.openclaw.gateway_rpc import GatewayConfig as GatewayClientConf
 from app.services.openclaw.gateway_rpc import (
     OpenClawGatewayError,
     ensure_session,
+    get_exec_approvals,
     openclaw_call,
     send_message,
+    set_exec_approvals,
 )
 from app.services.openclaw.internal.agent_key import agent_key as _agent_key
 from app.services.openclaw.internal.agent_key import slugify
@@ -370,7 +373,7 @@ def _build_context(
     workspace_root = gateway.workspace_root
     workspace_path = _workspace_path(agent, workspace_root)
     session_key = agent.openclaw_session_id or ""
-    base_url = settings.base_url
+    base_url = settings.agent_base_url
     main_session_key = GatewayAgentIdentity.session_key(gateway)
     identity_context = _identity_context(agent)
     user_context = _user_context(user)
@@ -411,7 +414,7 @@ def _build_main_context(
     auth_token: str,
     user: User | None,
 ) -> dict[str, str]:
-    base_url = settings.base_url
+    base_url = settings.agent_base_url
     identity_context = _identity_context(agent)
     user_context = _user_context(user)
     return {
@@ -1105,6 +1108,66 @@ def _wakeup_text(agent: Agent, *, verb: str) -> str:
     )
 
 
+async def ensure_agent_exec_approvals(
+    agent_id: str,
+    config: GatewayClientConfig,
+) -> None:
+    """Ensure the agent has full exec permissions and /usr/bin/curl allowlisted.
+
+    Sets ``security: "full"`` so the agent can run any command (git, curl, etc.)
+    and adds ``/usr/bin/curl`` to the allowlist for auto-approval without prompting.
+    The function is idempotent.
+    """
+    try:
+        snapshot = await get_exec_approvals(config=config)
+        approvals_file: dict[str, Any] = snapshot.get("file", {}) if snapshot else {}
+        base_hash: str = snapshot.get("hash", "") if snapshot else ""
+
+        agents_section: dict[str, Any] = approvals_file.get("agents", {})
+        agent_entry: dict[str, Any] = agents_section.get(agent_id, {})
+
+        # Check if already fully configured.
+        existing_allowlist: list[dict[str, Any]] = agent_entry.get("allowlist", [])
+        already_has_curl = any(
+            entry.get("pattern") == "/usr/bin/curl" for entry in existing_allowlist
+        )
+        already_full = agent_entry.get("security") == "full"
+        if already_has_curl and already_full:
+            logger.debug(
+                "exec_approvals.already_configured agent_id=%s",
+                agent_id,
+            )
+            return
+
+        # Add /usr/bin/curl to allowlist if missing.
+        if not already_has_curl:
+            existing_allowlist.append(
+                {"id": str(uuid4()), "pattern": "/usr/bin/curl"},
+            )
+            agent_entry["allowlist"] = existing_allowlist
+
+        # Full exec permissions — the agent needs to run git, curl, mkdir, etc.
+        agent_entry["security"] = "full"
+        agent_entry["ask"] = "off"
+        agents_section[agent_id] = agent_entry
+        approvals_file["agents"] = agents_section
+
+        # Preserve defaults if missing.
+        approvals_file.setdefault("defaults", {})
+
+        await set_exec_approvals(approvals_file, base_hash, config=config)
+        logger.info(
+            "exec_approvals.configured agent_id=%s",
+            agent_id,
+        )
+    except Exception:
+        logger.warning(
+            "exec_approvals.failed agent_id=%s",
+            agent_id,
+            exc_info=True,
+        )
+
+
 class OpenClawGatewayProvisioner:
     """Gateway-only agent lifecycle interface (create -> files -> wake)."""
 
@@ -1185,6 +1248,20 @@ class OpenClawGatewayProvisioner:
             session_label=agent.name or "Gateway Agent",
         )
 
+        # Ensure the agent can execute curl for posting answers back to MC.
+        agent_gateway_id = (
+            GatewayAgentIdentity.openclaw_agent_id(gateway)
+            if board is None
+            else _agent_key(agent)
+        )
+        client_config = GatewayClientConfig(
+            url=gateway.url,
+            token=gateway.token,
+            allow_insecure_tls=gateway.allow_insecure_tls,
+            disable_device_pairing=gateway.disable_device_pairing,
+        )
+        await ensure_agent_exec_approvals(agent_gateway_id, client_config)
+
         if reset_session:
             try:
                 await control_plane.reset_agent_session(session_key)
@@ -1195,12 +1272,6 @@ class OpenClawGatewayProvisioner:
         if not wake:
             return
 
-        client_config = GatewayClientConfig(
-            url=gateway.url,
-            token=gateway.token,
-            allow_insecure_tls=gateway.allow_insecure_tls,
-            disable_device_pairing=gateway.disable_device_pairing,
-        )
         await ensure_session(session_key, config=client_config, label=agent.name)
         verb = wakeup_verb or ("provisioned" if action == "provision" else "updated")
         await send_message(
