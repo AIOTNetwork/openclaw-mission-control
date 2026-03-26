@@ -152,7 +152,9 @@ class OpenClawDockerService:
             channels["discord"] = {
                 "enabled": True,
                 "token": discord_bot_token,
+                "groupPolicy": "open",
                 "dm": {"policy": dm_policy},
+                "guilds": {"*": {"requireMention": True}},
             }
             plugins["discord"] = {"enabled": True}
 
