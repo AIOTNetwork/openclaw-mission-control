@@ -1126,13 +1126,15 @@ async def ensure_agent_exec_approvals(
         agents_section: dict[str, Any] = approvals_file.get("agents", {})
         agent_entry: dict[str, Any] = agents_section.get(agent_id, {})
 
-        # Check if already fully configured.
+        # Check if already fully configured (agent + defaults).
         existing_allowlist: list[dict[str, Any]] = agent_entry.get("allowlist", [])
         already_has_curl = any(
             entry.get("pattern") == "/usr/bin/curl" for entry in existing_allowlist
         )
         already_full = agent_entry.get("security") == "full"
-        if already_has_curl and already_full:
+        defaults = approvals_file.get("defaults", {})
+        defaults_full = defaults.get("security") == "full" and defaults.get("ask") == "off"
+        if already_has_curl and already_full and defaults_full:
             logger.debug(
                 "exec_approvals.already_configured agent_id=%s",
                 agent_id,
@@ -1152,8 +1154,11 @@ async def ensure_agent_exec_approvals(
         agents_section[agent_id] = agent_entry
         approvals_file["agents"] = agents_section
 
-        # Preserve defaults if missing.
-        approvals_file.setdefault("defaults", {})
+        # Ensure defaults grant full exec permissions for all agents.
+        defaults = approvals_file.get("defaults", {})
+        defaults["security"] = "full"
+        defaults["ask"] = "off"
+        approvals_file["defaults"] = defaults
 
         await set_exec_approvals(approvals_file, base_hash, config=config)
         logger.info(
