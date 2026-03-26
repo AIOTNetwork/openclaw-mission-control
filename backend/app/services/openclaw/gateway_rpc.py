@@ -525,6 +525,28 @@ async def openclaw_connect_metadata(*, config: GatewayConfig) -> object:
         raise OpenClawGatewayError(str(exc)) from exc
 
 
+async def get_exec_approvals(*, config: GatewayConfig) -> dict[str, Any]:
+    """Fetch the current exec-approvals file from the gateway."""
+    result = await openclaw_call("exec.approvals.get", {}, config=config)
+    if not isinstance(result, dict):
+        return {}
+    return result
+
+
+async def set_exec_approvals(
+    file: dict[str, Any],
+    base_hash: str,
+    *,
+    config: GatewayConfig,
+) -> object:
+    """Write an updated exec-approvals file back to the gateway."""
+    return await openclaw_call(
+        "exec.approvals.set",
+        {"file": file, "baseHash": base_hash},
+        config=config,
+    )
+
+
 async def send_message(
     message: str,
     *,
