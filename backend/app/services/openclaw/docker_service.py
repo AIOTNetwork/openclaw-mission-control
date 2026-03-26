@@ -117,6 +117,7 @@ class OpenClawDockerService:
         discord_bot_token: str | None = None,
         telegram_bot_token: str | None = None,
         discord_user_ids: list[str] | None = None,
+        discord_guild_ids: list[str] | None = None,
         telegram_user_ids: list[str] | None = None,
         host_config_dir: str | None = None,
     ) -> None:
@@ -149,12 +150,18 @@ class OpenClawDockerService:
             plugins["telegram"] = {"enabled": True}
 
         if discord_bot_token:
+            if discord_guild_ids:
+                guild_policy = "allowlist"
+                guilds_config = {gid: {"requireMention": True} for gid in discord_guild_ids}
+            else:
+                guild_policy = "open"
+                guilds_config = {"*": {"requireMention": True}}
             channels["discord"] = {
                 "enabled": True,
                 "token": discord_bot_token,
-                "groupPolicy": "open",
+                "groupPolicy": guild_policy,
                 "dm": {"policy": dm_policy},
-                "guilds": {"*": {"requireMention": True}},
+                "guilds": guilds_config,
             }
             plugins["discord"] = {"enabled": True}
 

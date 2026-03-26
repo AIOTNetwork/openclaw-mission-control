@@ -133,6 +133,7 @@ class GatewaySpinUpService:
                 discord_bot_token=payload.discord_bot_token,
                 telegram_bot_token=payload.telegram_bot_token,
                 discord_user_ids=payload.discord_user_ids,
+                discord_guild_ids=payload.discord_guild_ids,
                 telegram_user_ids=payload.telegram_user_ids,
                 host_config_dir=host_config_dir,
             )

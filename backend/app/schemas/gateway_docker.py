@@ -18,6 +18,7 @@ class GatewaySpinUpCreate(SQLModel):
     discord_bot_token: str | None = None
     telegram_bot_token: str | None = None
     discord_user_ids: list[str] | None = None
+    discord_guild_ids: list[str] | None = None
     telegram_user_ids: list[str] | None = None
 
     @model_validator(mode="after")

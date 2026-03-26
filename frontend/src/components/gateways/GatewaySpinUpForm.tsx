@@ -240,6 +240,9 @@ export function GatewaySpinUpForm({
           .map((id) => id.trim())
           .filter(Boolean);
       }
+      if (selectedGuildId) {
+        body.discord_guild_ids = [selectedGuildId];
+      }
       if (telegramUserIds.trim()) {
         body.telegram_user_ids = telegramUserIds
           .split(",")
