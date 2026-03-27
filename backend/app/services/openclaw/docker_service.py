@@ -207,6 +207,13 @@ class OpenClawDockerService:
                 },
                 "tailscale": {"mode": "off", "resetOnExit": False},
             },
+            "tools": {
+                "exec": {
+                    "host": "gateway",
+                    "security": "full",
+                    "ask": "off",
+                },
+            },
             "plugins": {"entries": plugins},
         }
         (config_path / "openclaw.json").write_text(
